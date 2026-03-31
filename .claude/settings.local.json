@@ -1,0 +1,10 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(npx prisma:*)",
+      "Bash(node -e \":*)",
+      "Read(//c/Users/DBO Expert/.claude/projects/c--Users-DBO-Expert-Projets-rd-project-manager/**)",
+      "Read(//c/Users/DBO Expert/.claude/projects/c--Users-DBO-Expert-Projets-rd-project-manager/memory/**)"
+    ]
+  }
+}

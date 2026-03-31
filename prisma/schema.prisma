@@ -1,0 +1,690 @@
+// prisma/schema.prisma
+// Schéma complet InnoProject — MVP RS&DE
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+// ======= ENUMS =======
+
+enum UserRole {
+  ADMIN
+  PROJECT_MANAGER
+  MEMBER
+  VIEWER
+}
+
+enum ProjectStatus {
+  DRAFT
+  ACTIVE
+  COMPLETED
+  ARCHIVED
+}
+
+// Statut ARC du projet (workflow scientifique RS&DE)
+enum ProjectARCStatus {
+  DRAFT                  // Brouillon
+  HYPOTHESIS_DEFINED     // Hypothèses définies
+  IN_EXPERIMENTATION     // En expérimentation
+  ANALYZING_RESULTS      // Analyse des résultats
+  PIVOT                  // Pivot / changement de direction
+  ADVANCEMENT_REACHED    // Avancement technologique atteint
+  CLOSED                 // Fermé
+}
+
+enum TaskStatus {
+  TODO
+  IN_PROGRESS
+  IN_REVIEW
+  DONE
+  BLOCKED
+  ABANDONED
+}
+
+// Type ARC de la tâche (classification RS&DE)
+enum ARCTaskType {
+  EXPERIMENTAL_DEVELOPMENT  // Développement expérimental
+  APPLIED_RESEARCH          // Recherche appliquée
+  BASIC_RESEARCH            // Recherche fondamentale
+  SUPPORT                   // Activités de soutien
+  NON_ELIGIBLE              // Non admissible
+}
+
+enum Priority {
+  LOW
+  MEDIUM
+  HIGH
+  CRITICAL
+}
+
+enum DependencyType {
+  FINISH_TO_START   // B commence quand A est terminé (le plus courant)
+  START_TO_START    // B commence quand A commence
+  FINISH_TO_FINISH  // B se termine quand A se termine
+  START_TO_FINISH   // B se termine quand A commence (rare)
+}
+
+enum SRDECategory {
+  RD_DIRECT
+  RD_SUPPORT
+  NON_ELIGIBLE
+}
+
+enum ExpenseCategory {
+  SALARY
+  MATERIALS
+  SUBCONTRACT
+  EQUIPMENT
+  OVERHEAD
+  OTHER
+}
+
+enum SRDEEligibility {
+  ELIGIBLE
+  PARTIAL
+  NOT_ELIGIBLE
+}
+
+enum NoteType {
+  DISCUSSION
+  DECISION
+  ACTION
+  RESULT
+}
+
+// Types d'entrées dans le journal de bord
+enum JournalEntryType {
+  OBSERVATION       // Observation
+  DISCOVERY         // Découverte
+  PROBLEM           // Problème rencontré
+  DECISION          // Décision prise
+  DIRECTION_CHANGE  // Changement de direction
+  TEST_RESULT       // Résultat de test
+  GENERAL           // Note générale
+}
+
+// Résultat d'une expérience/test
+enum TestResultType {
+  CONCLUSIVE        // Concluant
+  NON_CONCLUSIVE    // Non concluant
+  PARTIAL           // Partiel
+}
+
+// Statut d'une hypothèse
+enum HypothesisStatus {
+  ACTIVE    // Hypothèse active
+  ARCHIVED  // Archivée (remplacée par nouvelle version)
+  ABANDONED // Abandonnée (avec raison de pivot)
+}
+
+// Décision de gate (Stage-Gate)
+enum GateDecision {
+  GO
+  NO_GO
+  HOLD
+  RECYCLE
+}
+
+// Statut Kanban d'une Experiment Card
+enum ExperimentCardStatus {
+  HYPOTHESIS        // Hypothèse à tester
+  PROTOCOL_DEFINED  // Protocole défini
+  IN_PROGRESS       // Expérience en cours
+  RESULT_OBTAINED   // Résultat obtenu
+  ANALYSIS          // En analyse
+  VALIDATED         // Hypothèse validée ✓
+  PIVOTED           // A mené à un pivot ↻
+}
+
+// Statut d'un sprint R&D
+enum SprintStatus {
+  PLANNING
+  ACTIVE
+  COMPLETED
+  CANCELLED
+}
+
+// Type de jalon RS&DE
+enum MilestoneType {
+  PLANNED_EXPERIENCE  // Expérience planifiée
+  CRITICAL_TEST       // Test critique
+  DECISION_POINT      // Point de décision
+  REVIEW              // Revue d'avancement
+  DELIVERABLE         // Livrable
+}
+
+// ======= MODELS =======
+
+model Organization {
+  id        String   @id @default(cuid())
+  name      String
+  industry  String?
+  size      String?
+  province  String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  users     User[]
+  projects  Project[]
+  settings  OrganizationSettings?
+}
+
+// Paramètres de l'organisation (SMTP, notifications, etc.)
+model OrganizationSettings {
+  id             String   @id @default(cuid())
+  organizationId String   @unique
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  // SMTP
+  smtpHost       String?
+  smtpPort       Int      @default(587)
+  smtpSecure     Boolean  @default(false)
+  smtpUser       String?
+  smtpPass       String?  // Stocké chiffré en prod
+  smtpFrom       String?  // Ex: "InnoProject <noreply@monentreprise.ca>"
+  // Notifications
+  notifyBudget90 Boolean  @default(true)
+  notifyBudget100 Boolean @default(true)
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+}
+
+model User {
+  id             String               @id @default(cuid())
+  email          String               @unique
+  name           String
+  password       String
+  role           UserRole             @default(MEMBER)
+  hourlyRate      Float?
+  weeklyCapacity  Float?  @default(40)  // Heures disponibles par semaine
+  organizationId  String
+  organization   Organization         @relation(fields: [organizationId], references: [id])
+  createdAt      DateTime             @default(now())
+  timeEntries    TimeEntry[]
+  projectMembers ProjectMember[]
+  assignedTasks  Task[]               @relation("TaskAssignee")
+  meetingNotes   MeetingNote[]        @relation("NoteAssignee")
+  meetings       MeetingParticipant[]
+  journalEntries JournalEntry[]
+  approvalRequests  ExpenseApproval[] @relation("ApprovalRequester")
+  approvalDecisions ExpenseApproval[] @relation("ApprovalApprover")
+  experimentCards   ExperimentCard[]  @relation("CardAssignee")
+  pivots            Pivot[]           @relation("PivotCreator")
+  notifications     Notification[]
+}
+
+model Notification {
+  id             String           @id @default(cuid())
+  userId         String
+  user           User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+  type           NotificationType
+  title          String
+  body           String?
+  link           String?          // URL vers la ressource concernée
+  isRead         Boolean          @default(false)
+  createdAt      DateTime         @default(now())
+}
+
+enum NotificationType {
+  TASK_ASSIGNED        // Tâche affectée à moi
+  TASK_OVERDUE         // Tâche en retard
+  TASK_DONE            // Tâche complétée (pour le créateur)
+  BUDGET_ALERT_90      // Budget à 90%
+  BUDGET_ALERT_100     // Budget dépassé
+  EXPENSE_PENDING      // Dépense en attente d'approbation
+  EXPENSE_APPROVED     // Dépense approuvée
+  EXPENSE_REJECTED     // Dépense refusée
+  SPRINT_STARTING      // Sprint démarre dans 1 jour
+  SPRINT_ENDING        // Sprint se termine dans 1 jour
+  MEMBER_ADDED         // Ajouté à un projet
+  PIVOT_CREATED        // Pivot créé sur un projet
+}
+
+model Project {
+  id              String           @id @default(cuid())
+  name            String
+  code            String
+  description     String?
+  status          ProjectStatus    @default(DRAFT)
+  arcStatus       ProjectARCStatus @default(DRAFT)
+  trlLevel        Int              @default(1)
+  currentGate     Int              @default(0)
+  statusConfig    Json?            // Config des statuts personnalisés
+  customColumns   Json?            // Colonnes personnalisées du tableau
+  startDate       DateTime
+  endDate         DateTime?
+  organizationId  String
+  organization    Organization     @relation(fields: [organizationId], references: [id])
+  createdAt       DateTime         @default(now())
+  updatedAt       DateTime         @updatedAt
+  charter         ProjectCharter?
+  members         ProjectMember[]
+  tasks           Task[]
+  milestones      Milestone[]
+  meetings        Meeting[]
+  timeEntries     TimeEntry[]
+  expenses        Expense[]
+  budgetLines     BudgetLine[]
+  hypotheses      Hypothesis[]
+  journalEntries  JournalEntry[]
+  testExperiences TestExperience[]
+  reports         Report[]
+  sprints         Sprint[]
+  experimentCards ExperimentCard[]
+  pivots          Pivot[]
+  trlHistory         TRLHistory[]
+  trlChecklistItems  TRLChecklistItem[]
+  gateDecisions      StageGateDecision[]
+  gateDeliverables GateDeliverable[]
+}
+
+model GateDeliverable {
+  id          String    @id @default(cuid())
+  projectId   String
+  project     Project   @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  gate        Int       // Gate cible (0-5)
+  label       String
+  description String?   @db.Text
+  completed   Boolean   @default(false)
+  dueDate     DateTime?
+  completedAt DateTime?
+  isCustom    Boolean   @default(false)
+  sortOrder   Int       @default(0)
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+}
+
+model StageGateDecision {
+  id          String       @id @default(cuid())
+  projectId   String
+  project     Project      @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  gate        Int          // 0 à 5
+  decision    GateDecision
+  criteria    Json?        // { id, label, passed }[]
+  notes       String?      @db.Text
+  createdById String?
+  createdAt   DateTime     @default(now())
+}
+
+model TRLHistory {
+  id          String   @id @default(cuid())
+  projectId   String
+  project     Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  fromLevel   Int
+  toLevel     Int
+  note        String?  @db.Text
+  createdById String?
+  createdAt   DateTime @default(now())
+}
+
+// Item de liste de vérification NMT/TRL (officiel GC ou personnalisé)
+model TRLChecklistItem {
+  id        String   @id @default(cuid())
+  projectId String
+  project   Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  trlLevel  Int      // 1-9
+  text      String   @db.Text
+  checked   Boolean  @default(false)
+  isCustom  Boolean  @default(false)  // false = item officiel GC, true = item personnalisé
+  sortOrder Int      @default(0)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model ProjectCharter {
+  id                      String   @id @default(cuid())
+  projectId               String   @unique
+  project                 Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  objective               String   @db.Text
+  technicalUncertainties  String   @db.Text
+  hypotheses              String   @db.Text
+  acceptanceCriteria      String   @db.Text
+  expectedDeliverables    String   @db.Text
+  scope                   String?  @db.Text
+  constraints             String?  @db.Text
+  createdAt               DateTime @default(now())
+  updatedAt               DateTime @updatedAt
+}
+
+model ProjectMember {
+  id               String   @id @default(cuid())
+  projectId        String
+  project          Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  userId           String
+  user             User     @relation(fields: [userId], references: [id])
+  role             String   @default("Membre")
+  responsibilities String?
+  joinedAt         DateTime @default(now())
+  @@unique([projectId, userId])
+}
+
+model Task {
+  id             String      @id @default(cuid())
+  title          String
+  description    String?     @db.Text
+  status         TaskStatus  @default(TODO)
+  priority       Priority    @default(MEDIUM)
+  arcType        ARCTaskType @default(EXPERIMENTAL_DEVELOPMENT)
+  isRDEligible   Boolean     @default(true)
+  abandonReason  String?     @db.Text
+  estimatedHours Float?
+  startDate      DateTime?
+  dueDate        DateTime?
+  completedAt    DateTime?
+  isMilestone    Boolean     @default(false)
+  sortOrder      Int         @default(0)
+  projectId      String
+  project        Project     @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  assigneeId     String?
+  assignee       User?       @relation("TaskAssignee", fields: [assigneeId], references: [id])
+  parentId       String?
+  parent         Task?       @relation("TaskChildren", fields: [parentId], references: [id])
+  children       Task[]      @relation("TaskChildren")
+  timeEntries    TimeEntry[]
+  customData     Json?       // Valeurs des colonnes personnalisées
+  predecessors   TaskDependency[] @relation("SuccessorTask")
+  successors     TaskDependency[] @relation("PredecessorTask")
+  createdAt      DateTime    @default(now())
+  updatedAt      DateTime    @updatedAt
+}
+
+model TaskDependency {
+  id            String         @id @default(cuid())
+  predecessorId String
+  predecessor   Task           @relation("PredecessorTask", fields: [predecessorId], references: [id], onDelete: Cascade)
+  successorId   String
+  successor     Task           @relation("SuccessorTask", fields: [successorId], references: [id], onDelete: Cascade)
+  type          DependencyType @default(FINISH_TO_START)
+  lag           Int            @default(0)  // jours de décalage (positif = délai, négatif = chevauchement)
+  createdAt     DateTime       @default(now())
+  @@unique([predecessorId, successorId])
+}
+
+model Milestone {
+  id           String        @id @default(cuid())
+  title        String
+  description  String?
+  type         MilestoneType @default(DELIVERABLE)
+  dueDate      DateTime
+  completed    Boolean       @default(false)
+  completedAt  DateTime?
+  changeReason String?       @db.Text
+  projectId    String
+  project      Project       @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  createdAt    DateTime      @default(now())
+}
+
+model TimeEntry {
+  id               String       @id @default(cuid())
+  date             DateTime
+  hours            Float
+  description      String       @db.Text
+  category         SRDECategory @default(RD_DIRECT)
+  validated        Boolean      @default(false)
+  isRetrospective  Boolean      @default(false)
+  timerStart       DateTime?
+  timerEnd         DateTime?
+  userId           String
+  user             User         @relation(fields: [userId], references: [id])
+  taskId           String?
+  task             Task?        @relation(fields: [taskId], references: [id])
+  projectId        String
+  project          Project      @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  createdAt        DateTime     @default(now())
+  updatedAt        DateTime     @default(now())
+}
+
+model Meeting {
+  id           String                @id @default(cuid())
+  title        String
+  date         DateTime
+  duration     Int
+  location     String?
+  agenda       String?               @db.Text
+  summary      String?               @db.Text
+  decisions    String?               @db.Text
+  problems     String?               @db.Text
+  nextSteps    String?               @db.Text
+  projectId    String
+  project      Project               @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  notes        MeetingNote[]
+  participants MeetingParticipant[]
+  createdAt    DateTime              @default(now())
+  updatedAt    DateTime              @default(now())
+}
+
+model MeetingParticipant {
+  id        String  @id @default(cuid())
+  meetingId String
+  meeting   Meeting @relation(fields: [meetingId], references: [id], onDelete: Cascade)
+  userId    String
+  user      User    @relation(fields: [userId], references: [id])
+  @@unique([meetingId, userId])
+}
+
+model MeetingNote {
+  id           String    @id @default(cuid())
+  content      String    @db.Text
+  type         NoteType  @default(DISCUSSION)
+  isRDRelevant Boolean   @default(false)
+  meetingId    String
+  meeting      Meeting   @relation(fields: [meetingId], references: [id], onDelete: Cascade)
+  assigneeId   String?
+  assignee     User?     @relation("NoteAssignee", fields: [assigneeId], references: [id])
+  dueDate      DateTime?
+  createdAt    DateTime  @default(now())
+}
+
+// Hypothèses RS&DE avec versioning et pivots
+model Hypothesis {
+  id              String           @id @default(cuid())
+  version         Int              @default(1)
+  title           String
+  description     String           @db.Text
+  status          HypothesisStatus @default(ACTIVE)
+  pivotReason     String?          @db.Text
+  projectId       String
+  project         Project          @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  experimentCards ExperimentCard[]
+  createdAt       DateTime         @default(now())
+  updatedAt       DateTime         @updatedAt
+}
+
+// Journal de bord immuable (preuve contemporaine ARC)
+model JournalEntry {
+  id               String           @id @default(cuid())
+  type             JournalEntryType @default(GENERAL)
+  title            String?
+  content          String           @db.Text
+  structuredData   Json?
+  tags             String[]
+  signedBy         String?
+  signedAt         DateTime?
+  projectId        String
+  project          Project          @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  authorId         String
+  author           User             @relation(fields: [authorId], references: [id])
+  attachments      Attachment[]
+  experimentCardId String?
+  experimentCard   ExperimentCard?  @relation(fields: [experimentCardId], references: [id])
+  createdAt        DateTime         @default(now())
+  // Pas de updatedAt — immuable par design pour conformité ARC
+}
+
+// Expériences et tests R&D
+model TestExperience {
+  id             String          @id @default(cuid())
+  title          String
+  objective      String          @db.Text
+  parameters     String?         @db.Text
+  protocol       String?         @db.Text
+  results        String?         @db.Text
+  conclusion     String?         @db.Text
+  resultType     TestResultType?
+  structuredData Json?           // Tableau (_table) + dessin (_drawing)
+  projectId      String
+  project        Project         @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  attachments    Attachment[]
+  createdAt      DateTime        @default(now())
+  updatedAt      DateTime        @updatedAt
+}
+
+// Pièces jointes (polymorphiques)
+model Attachment {
+  id               String          @id @default(cuid())
+  fileName         String
+  fileUrl          String
+  fileSize         Int?
+  mimeType         String?
+  journalEntryId   String?
+  journalEntry     JournalEntry?   @relation(fields: [journalEntryId], references: [id], onDelete: Cascade)
+  testExperienceId String?
+  testExperience   TestExperience? @relation(fields: [testExperienceId], references: [id], onDelete: Cascade)
+  experimentCardId String?
+  experimentCard   ExperimentCard? @relation(fields: [experimentCardId], references: [id], onDelete: Cascade)
+  createdAt        DateTime        @default(now())
+}
+
+// Rapports RS&DE générés (T661 + CRIC)
+model Report {
+  id           String   @id @default(cuid())
+  fiscalYear   Int
+  title        String
+  t661Data     Json?    // Données formulaire T661 (lignes 242/244/246, narratifs)
+  cricData     Json?    // Données CRIC Québec
+  auditData    Json?    // Données dossier d'audit
+  generatedAt  DateTime @default(now())
+  projectId    String
+  project      Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+}
+
+enum ExpenseStatus {
+  APPROVED         // Approuvée automatiquement (dans le budget)
+  PENDING          // En attente d'approbation (dépassement budget)
+  REJECTED         // Rejetée par l'approbateur
+}
+
+model Expense {
+  id              String          @id @default(cuid())
+  description     String
+  amount          Float
+  date            DateTime
+  category        ExpenseCategory
+  supplier        String?
+  invoiceRef      String?
+  srdeEligibility SRDEEligibility @default(ELIGIBLE)
+  srdePercentage  Float?
+  notes           String?         @db.Text
+  status          ExpenseStatus   @default(APPROVED)
+  projectId       String
+  project         Project         @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  approval        ExpenseApproval?
+  createdAt       DateTime        @default(now())
+  updatedAt       DateTime        @updatedAt
+}
+
+// Workflow d'approbation pour les dépenses dépassant le budget
+model ExpenseApproval {
+  id              String    @id @default(cuid())
+  expenseId       String    @unique
+  expense         Expense   @relation(fields: [expenseId], references: [id], onDelete: Cascade)
+  requestedById   String
+  requestedBy     User      @relation("ApprovalRequester", fields: [requestedById], references: [id])
+  approverId      String?
+  approver        User?     @relation("ApprovalApprover", fields: [approverId], references: [id])
+  reason          String    @db.Text  // Justification du dépassement
+  comment         String?   @db.Text  // Commentaire de l'approbateur
+  budgetBefore    Float     // Budget total avant cette dépense
+  budgetTotal     Float     // Budget total prévu
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+}
+
+model BudgetLine {
+  id               String          @id @default(cuid())
+  category         ExpenseCategory
+  planned          Float
+  description      String?
+  fiscalYear       Int             @default(2026)
+  distributionMode String          @default("MONTHLY") // MONTHLY | WEEKLY
+  projectId        String
+  project          Project         @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  createdAt        DateTime        @default(now())
+  updatedAt        DateTime        @updatedAt
+}
+
+// ── Sprint R&D (contient les Experiment Cards) ────────────────────────────────
+model Sprint {
+  id           String        @id @default(cuid())
+  title        String
+  goal         String?       @db.Text  // Objectif scientifique du sprint
+  startDate    DateTime
+  endDate      DateTime
+  status       SprintStatus  @default(PLANNING)
+  retroLessons String?       @db.Text  // Leçons scientifiques apprises
+  retroPivot   String?       @db.Text  // Décision pivot post-sprint
+  capacity     Float?        // Heures labo disponibles
+  projectId    String
+  project      Project       @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  cards        ExperimentCard[]
+  createdAt    DateTime      @default(now())
+  updatedAt    DateTime      @updatedAt
+}
+
+// ── Experiment Card (cœur du Agile R&D — remplace les User Stories) ───────────
+model ExperimentCard {
+  id              String               @id @default(cuid())
+  title           String
+  hypothesisText  String               @db.Text  // Hypothèse précise à tester
+  method          String?              @db.Text  // Méthode / protocole
+  materials       String?              @db.Text  // Matériaux et équipements
+  variables       String?              @db.Text  // Variables (indép./dép./contrôle)
+  expectedResult  String?              @db.Text  // Résultat attendu
+  actualResult    String?              @db.Text  // Résultat réel observé
+  conclusion      String?              @db.Text  // Conclusion scientifique
+  resultType      TestResultType?                // CONCLUSIVE / NON_CONCLUSIVE / PARTIAL
+  status          ExperimentCardStatus @default(HYPOTHESIS)
+  sortOrder       Int                  @default(0)
+  estimatedHours  Float?
+  actualHours     Float?
+  isRDEligible    Boolean              @default(true)
+  projectId       String
+  project         Project              @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  sprintId        String?
+  sprint          Sprint?              @relation(fields: [sprintId], references: [id])
+  hypothesisId    String?
+  hypothesis      Hypothesis?          @relation(fields: [hypothesisId], references: [id])
+  assigneeId      String?
+  assignee        User?                @relation("CardAssignee", fields: [assigneeId], references: [id])
+  pivots          Pivot[]
+  journalEntries  JournalEntry[]
+  attachments     Attachment[]
+  createdAt       DateTime             @default(now())
+  updatedAt       DateTime             @updatedAt
+}
+
+// ── Pivot Tracker (arbre de décision — preuve d'incertitude pour l'ARC) ───────
+model Pivot {
+  id               String          @id @default(cuid())
+  reason           String          @db.Text  // Pourquoi l'hypothèse a échoué
+  oldDirection     String          @db.Text  // Ancienne direction / hypothèse
+  newDirection     String          @db.Text  // Nouvelle direction proposée
+  lessons          String?         @db.Text  // Leçons scientifiques apprises
+  budgetImpact     String?         @db.Text  // Impact budgétaire estimé
+  timelineImpact   String?         @db.Text  // Impact sur le calendrier
+  projectId        String
+  project          Project         @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  experimentCardId String?
+  experimentCard   ExperimentCard? @relation(fields: [experimentCardId], references: [id])
+  parentPivotId    String?
+  parentPivot      Pivot?          @relation("PivotTree", fields: [parentPivotId], references: [id])
+  childPivots      Pivot[]         @relation("PivotTree")
+  createdById      String?
+  createdBy        User?           @relation("PivotCreator", fields: [createdById], references: [id])
+  createdAt        DateTime        @default(now())
+  updatedAt        DateTime        @updatedAt
+}
