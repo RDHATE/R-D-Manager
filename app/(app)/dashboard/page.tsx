@@ -55,7 +55,7 @@ export default async function DashboardPage() {
     prisma.project.groupBy({ by: ["status"], where: { organizationId: orgId }, _count: true }),
   ])
 
-  const activeProjects = projects.filter(p => p.status === "ACTIVE").length
+  const activeProjects = projects.filter((p: any) => p.status === "ACTIVE").length
   const totalHours = hoursMonth._sum.hours ?? 0
   const totalSpent = expenses._sum.amount ?? 0
   const totalBudget = budgetLines._sum.planned ?? 0
