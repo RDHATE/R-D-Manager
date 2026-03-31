@@ -147,8 +147,8 @@ export default async function DashboardPage() {
   ]
 
   // Normalize groupBy results for serialization
-  const normalizedProjectsByStatus = projectsByStatus.map(s => ({ status: s.status, _count: s._count }))
-  const normalizedTasksByStatus = tasksByStatus.map(s => ({ status: s.status, _count: s._count }))
+  const normalizedProjectsByStatus = projectsByStatus.map((s: any) => ({ status: s.status, _count: s._count }))
+  const normalizedTasksByStatus = tasksByStatus.map((s: any) => ({ status: s.status, _count: s._count }))
 
   return (
     <DashboardClient
